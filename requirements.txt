@@ -3,3 +3,4 @@ google-genai
 pypdf
 docx2txt
 pillow
+scikit-learn
