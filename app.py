@@ -5,6 +5,8 @@ import pypdf
 import docx2txt
 from google import genai
 from google.genai import types
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # 🖥️ Page Layout Setup
 st.set_page_config(
@@ -18,14 +20,14 @@ st.caption("Upload an Image, PDF, DOCX, or TXT document to evaluate CV compatibi
 
 # --- 🔑 OPTIONAL SIDEBAR API KEY CONFIGURATION ENGINE ---
 st.sidebar.header("🔐 Security Settings")
-st.sidebar.markdown("This app runs automatically using our host server key. Optionally, you can supply your personal Google AI Studio Key below to use your own limits.")
+st.sidebar.markdown("This app can run automatically using a host server key. Optionally, you can supply your personal Google AI Studio Key below.")
 
 # Completely optional password input widget hidden in the sidebar
 user_custom_key = st.sidebar.text_input(
     label="Your Google API Key (Optional):",
     type="password",
     placeholder="AIzaSy...",
-    help="Leave this blank to use the app's default server token environment."
+    help="Leave this blank to use the app's default server token environment or fallback mode."
 )
 
 # Resolution loop checking priority tier chains
@@ -37,7 +39,7 @@ elif "GOOGLE_API_KEY" in st.secrets:
     active_api_key = st.secrets["GOOGLE_API_KEY"]
     st.sidebar.info("🔒 Running on App Server Secret Key configuration.")
 else:
-    st.sidebar.error("❌ Key Missing: Paste an optional token above or configure secrets to activate the engine.")
+    st.sidebar.warning("💡 No API Key active. System will switch to standalone local parser.")
 
 # Instantiate client context based on availability state profiles
 ai_client = None
@@ -45,8 +47,9 @@ if active_api_key:
     try:
         ai_client = genai.Client(api_key=active_api_key)
     except Exception as init_err:
-        st.error(f"Failed to bind client instance layout: {init_err}")
+        st.sidebar.error(f"Failed to bind client instance layout: {init_err}")
 
+# --- 🛠️ TEXT EXTRACTION ENGINE ---
 def extract_text_from_bytes(file_bytes, filename):
     """Safely extracts raw text data based on standard file extensions."""
     ext = filename.split('.')[-1].lower()
@@ -68,11 +71,80 @@ def extract_text_from_bytes(file_bytes, filename):
         return f"[Error parsing text inside {filename}: {str(e)}]"
     return text
 
+# --- 📉 FALLBACK Standalone LOCAL PARSER ENGINE (When Key is Absent) ---
+def run_local_keyword_assessment(jd_clean, cv_clean):
+    """Calculates weighted keyword distribution matrices locally without any external API calls."""
+    categories = {
+        "Education": {
+            "weight": 0.25,
+            "keywords": ["btech", "ms", "phd", "iit", "bits", "iiit", "nit", "computer science", "degree"]
+        },
+        "Domain Expertise": {
+            "weight": 0.30,
+            "keywords": ["computer vision", "video analytics", "object detection", "tracking", "activity recognition", "perception", "machine learning", "data scientist"]
+        },
+        "Technical Stack": {
+            "weight": 0.25,
+            "keywords": ["pytorch", "tensorflow", "transformers", "3d cnns", "mot", "cnn", "opencv", "python", "sql"]
+        },
+        "Scale & Deployment": {
+            "weight": 0.20,
+            "keywords": ["edge deployment", "mlops", "real-time inference", "production-scale", "production", "inference"]
+        }
+    }
+
+    total_score = 0
+    table_rows = ""
+    jd_lower = jd_clean.lower()
+    cv_lower = cv_clean.lower()
+    
+    for cat, data in categories.items():
+        weight = data["weight"]
+        keywords = data["keywords"]
+        
+        jd_filtered = " ".join([kw for kw in keywords if kw in jd_lower])
+        cv_filtered = " ".join([kw for kw in keywords if kw in cv_lower])
+        
+        if not jd_filtered:
+            cat_score = 100.0
+        elif not cv_filtered:
+            cat_score = 0.0
+        else:
+            vectorizer = TfidfVectorizer()
+            try:
+                tfidf_matrix = vectorizer.fit_transform([jd_filtered, cv_filtered])
+                cat_score = float(cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0] * 100)
+            except Exception:
+                cat_score = 0.0
+                
+        weighted_contrib = cat_score * weight
+        total_score += weighted_contrib
+        table_rows += f"<tr><td><b>{cat}</b></td><td>{weight*100}%</td><td>{cat_score:.1f}%</td><td>{weighted_contrib:.1f}%</td></tr>"
+        
+    breakdown_html = f"""
+    <table border='1' style='border-collapse: collapse; width: 100%; text-align: left; font-family: sans-serif;'>
+        <tr style='background-color: #f2f2f2;'><th>Category</th><th>Weight</th><th>Category Match Score</th><th>Weighted Contribution</th></tr>
+        {table_rows}
+        <tr style='background-color: #e6f7ff;'><td><b>FINAL MATCH SCORE</b></td><td><b>100%</b></td><td>-</td><td><b>{total_score:.1f}%</b></td></tr>
+    </table>
+    """
+    
+    # Generate static fallback next steps matching structure constraints
+    insights_html = f"""
+    <div style="margin-top: 25px; padding: 20px; border: 1px solid #cbd5e1; border-radius: 8px; background-color: #f8fafc; font-family: sans-serif; line-height: 1.6;">
+        <h3 style="color: #1e293b; margin-top: 0; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">🎯 HR / Recruiter Next Steps (Local Engine Mode)</h3>
+    """
+    if total_score >= 60:
+        insights_html += "<div><b>👉 Partial Matrix Check Fit:</b> Candidate possesses notable overlapping keywords. Move to initial phone screening pipeline loop checks.</div>"
+    else:
+        insights_html += "<div><b>👉 Review Framework Assets:</b> Core structural indicators fell below target footprints. Review manually to override false filter drops.</div>"
+    insights_html += "</div>"
+    
+    return total_score, breakdown_html, insights_html
+
+# --- 🌌 INTELLIGENT GOOGLE GENAI ENGINE (When Key is Present) ---
 def request_gemini_evaluation(jd_text, cv_text, cv_image_bytes=None, cv_filename=""):
     """Streams payloads directly into Gemini 2.5 Flash for unified context matching."""
-    if ai_client is None:
-        return 0.0, "API client unconfigured.", "Please set up or paste an API Key first."
-
     system_prompt = """
     You are an expert recruitment system modeled after Whitetable AI.
     Analyze the provided Job Description against the Candidate Resume.
@@ -98,18 +170,11 @@ def request_gemini_evaluation(jd_text, cv_text, cv_image_bytes=None, cv_filename
     [END_RECRUITER_STEPS]
     """
 
-    user_contents = []
-    
-    # Process JD payload
-    if not jd_text and cv_filename:
-        pass
-    else:
-        user_contents.append(f"TARGET JOB DESCRIPTION:\n{jd_text}\n\n")
+    user_contents = [
+        f"TARGET JOB DESCRIPTION:\n{jd_text}\n\n",
+        f"CANDIDATE RESUME TEXT:\n{cv_text}\n"
+    ]
 
-    # Process CV payload (Text string)
-    user_contents.append(f"CANDIDATE RESUME TEXT:\n{cv_text}\n")
-
-    # Pass Image visual structures directly if present
     if cv_image_bytes and cv_filename.split('.')[-1].lower() in ['jpg', 'jpeg', 'png', 'webp', 'bmp']:
         image_part = types.Part.from_bytes(data=cv_image_bytes, mime_type=f"image/{cv_filename.split('.')[-1].lower()}")
         user_contents.append("\nADDITIONAL VISUAL IMAGE ATTACHMENT PROCESSED BELOW:\n")
@@ -149,76 +214,86 @@ def request_gemini_evaluation(jd_text, cv_text, cv_image_bytes=None, cv_filename
     except Exception as e:
         return 0.0, f"Error processing request: {str(e)}", ""
 
-# --- UI Layout Session State Setup ---
-if "jd_text_val" not in st.session_state: st.session_state.jd_text_val = ""
-if "cv_text_val" not in st.session_state: st.session_state.cv_text_val = ""
-
+# --- 🔄 INTERACTIVE STATE WORKSPACE MAPPING ENGINE ---
 col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("📋 1. Target Job Description")
-    uploaded_jd = st.file_uploader("Upload JD File", type=["pdf", "docx", "txt", "png", "jpg", "jpeg"])
+    uploaded_jd = st.file_uploader("Upload JD File", type=["pdf", "docx", "txt", "png", "jpg", "jpeg"], key="jd_uploader")
     
+    jd_placeholder_text = ""
     if uploaded_jd:
         ext = uploaded_jd.name.split('.')[-1].lower()
-        if ext in ['png', 'jpg', 'jpeg']:
-            st.session_state.jd_text_val = f"[📸 Image Registered: {uploaded_jd.name}. Will evaluate visually.]"
+        if ext in ['png', 'jpg', 'jpeg', 'webp', 'bmp']:
+            jd_placeholder_text = f"[📸 Image Registered: {uploaded_jd.name}. Will evaluate visually.]"
         else:
-            st.session_state.jd_text_val = extract_text_from_bytes(uploaded_jd.read(), uploaded_jd.name)
+            jd_placeholder_text = extract_text_from_bytes(uploaded_jd.read(), uploaded_jd.name)
             
-    jd_area = st.text_area("JD Layout Workspace:", value=st.session_state.jd_text_val, height=220, key="jd_area_key")
+    jd_area = st.text_area("JD Layout Workspace:", value=jd_placeholder_text, height=220, key="jd_area_box")
 
 with col2:
     st.subheader("📄 2. Candidate Resume (CV)")
-    uploaded_cv = st.file_uploader("Upload CV File", type=["pdf", "docx", "txt", "png", "jpg", "jpeg"])
+    uploaded_cv = st.file_uploader("Upload CV File", type=["pdf", "docx", "txt", "png", "jpg", "jpeg"], key="cv_uploader")
     
+    cv_placeholder_text = ""
     cv_bytes, cv_name = None, ""
     if uploaded_cv:
         cv_name = uploaded_cv.name
         cv_bytes = uploaded_cv.read()
         ext = cv_name.split('.')[-1].lower()
-        if ext in ['png', 'jpg', 'jpeg']:
-            st.session_state.cv_text_val = f"[📸 Image Registered: {cv_name}. Will evaluate visually.]"
+        if ext in ['png', 'jpg', 'jpeg', 'webp', 'bmp']:
+            cv_placeholder_text = f"[📸 Image Registered: {cv_name}. Will evaluate visually.]"
         else:
-            st.session_state.cv_text_val = extract_text_from_bytes(cv_bytes, cv_name)
+            cv_placeholder_text = extract_text_from_bytes(cv_bytes, cv_name)
             
-    cv_area = st.text_area("CV Layout Workspace:", value=st.session_state.cv_text_val, height=220, key="cv_area_key")
+    cv_area = st.text_area("CV Layout Workspace:", value=cv_placeholder_text, height=220, key="cv_area_box")
 
-# --- 🚀 DASHBOARD ACTION CONTROLLERS ---
+# --- 🚀 CONFIGURING THE DYNAMIC TRIGGER BUTTON TEXT ---
+button_label = "🚀 Run Intelligent API Assessment" if ai_client is not None else "🚀 Run Intelligent Assessment"
+
 btn_col1, btn_col2 = st.columns([0.7, 0.3])
 
 with btn_col1:
-    run_btn = st.button("🚀 Run Intelligent API Assessment", use_container_width=True, type="primary")
+    run_btn = st.button(button_label, use_container_width=True, type="primary")
 
 with btn_col2:
     if st.button("🧹 Reset & Clean Dashboard", use_container_width=True):
-        st.session_state.jd_text_val = ""
-        st.session_state.cv_text_val = ""
         st.rerun()
 
 if run_btn:
-    if ai_client is None:
-        st.error("❌ Execution Aborted: Missing valid Google API key setup credentials. Please add a key in Secrets or use the optional sidebar input.")
+    final_jd = jd_area.strip()
+    final_cv = cv_area.strip()
+    
+    if not final_jd or not final_cv:
+        st.error("❌ Input Error: Both workspace areas must contain valid text parameters before continuing.")
     else:
-        final_jd = jd_area.strip() if "[📸 Image Registered:" not in jd_area else ""
-        final_cv = cv_area.strip() if "[📸 Image Registered:" not in cv_area else ""
-        
-        if (not final_jd and not uploaded_jd) or (not final_cv and not uploaded_cv):
-            st.error("❌ Input Error: Both fields must contain valid content to run matching profiles.")
+        # Check routing branch based on client initialization states
+        if ai_client is not None:
+            with st.spinner("🤖 Running context matrix analysis via Gemini AI API..."):
+                score, table_html, steps_html = request_gemini_evaluation(
+                    final_jd if "[📸 Image Registered:" not in final_jd else "",
+                    final_cv if "[📸 Image Registered:" not in final_cv else "",
+                    cv_bytes, cv_name
+                )
         else:
-            with st.spinner("🤖 Running contextual matrix analysis via Gemini..."):
-                score, table_html, steps_html = request_gemini_evaluation(final_jd, final_cv, cv_bytes, cv_name)
-                
-                color = "#28a745" if score >= 75 else ("#ffc107" if score >= 40 else "#dc3545")
-                tier = "TIER 1 (Strong Fit)" if score >= 75 else ("TIER 2 (Partial Fit)" if score >= 40 else "TIER 3 (Low Match)")
-                
-                st.markdown(f"""
-                <div style="padding: 16px; border-radius: 6px; background-color: {color}; color: white; margin-top: 15px;">
-                    <h2 style="margin: 0; color: white;">{score:.1f}% Match Rating</h2>
-                    <p style="margin: 4px 0 0 0; font-weight: bold;">Status Classification: {tier}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                st.write("### AI-Generated Matrix Profile:")
-                st.markdown(table_html, unsafe_allow_html=True)
-                st.markdown(steps_html, unsafe_allow_html=True)
+            with st.spinner("💾 No API Key found. Running analysis locally using independent keyword matching configurations..."):
+                if "[📸 Image Registered:" in final_jd or "[📸 Image Registered:" in final_cv:
+                    st.error("❌ Fallback Limitation: Image processing requires an active Google API Key. Please paste a key to read screenshot layouts.")
+                    score, table_html, steps_html = 0.0, "", ""
+                else:
+                    score, table_html, steps_html = run_local_keyword_assessment(final_jd, final_cv)
+        
+        if table_html:
+            color = "#28a745" if score >= 75 else ("#ffc107" if score >= 40 else "#dc3545")
+            tier = "TIER 1 (Strong Fit)" if score >= 75 else ("TIER 2 (Partial Fit)" if score >= 40 else "TIER 3 (Low Match)")
+            
+            st.markdown(f"""
+            <div style="padding: 16px; border-radius: 6px; background-color: {color}; color: white; margin-top: 15px;">
+                <h2 style="margin: 0; color: white;">{score:.1f}% Match Rating</h2>
+                <p style="margin: 4px 0 0 0; font-weight: bold;">Status Classification: {tier}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.write("### AI-Generated Matrix Profile:")
+            st.markdown(table_html, unsafe_allow_html=True)
+            st.markdown(steps_html, unsafe_allow_html=True)
