@@ -18,11 +18,16 @@ st.set_page_config(
 st.title("🎯 Whitetable AI: Multimodal Multi-Resume Screener")
 st.caption("Upload an Image, PDF, DOCX, or TXT document to evaluate CV compatibility contextually.")
 
+# --- 🔄 INITIALIZE SECURE STATE MAPS ---
+if "jd_workspace" not in st.session_state:
+    st.session_state.jd_workspace = ""
+if "cv_workspace" not in st.session_state:
+    st.session_state.cv_workspace = ""
+
 # --- 🔑 OPTIONAL SIDEBAR API KEY CONFIGURATION ENGINE ---
 st.sidebar.header("🔐 Security Settings")
 st.sidebar.markdown("This app can run automatically using a host server key. Optionally, you can supply your personal Google AI Studio Key below.")
 
-# Completely optional password input widget hidden in the sidebar
 user_custom_key = st.sidebar.text_input(
     label="Your Google API Key (Optional):",
     type="password",
@@ -30,7 +35,6 @@ user_custom_key = st.sidebar.text_input(
     help="Leave this blank to use the app's default server token environment or fallback mode."
 )
 
-# Resolution loop checking priority tier chains
 active_api_key = None
 if user_custom_key.strip():
     active_api_key = user_custom_key.strip()
@@ -41,7 +45,6 @@ elif "GOOGLE_API_KEY" in st.secrets:
 else:
     st.sidebar.warning("💡 No API Key active. System will switch to standalone local parser.")
 
-# Instantiate client context based on availability state profiles
 ai_client = None
 if active_api_key:
     try:
@@ -71,26 +74,13 @@ def extract_text_from_bytes(file_bytes, filename):
         return f"[Error parsing text inside {filename}: {str(e)}]"
     return text
 
-# --- 📉 FALLBACK Standalone LOCAL PARSER ENGINE (When Key is Absent) ---
+# --- 📉 FALLBACK STANDALONE LOCAL PARSER ENGINE ---
 def run_local_keyword_assessment(jd_clean, cv_clean):
-    """Calculates weighted keyword distribution matrices locally without any external API calls."""
     categories = {
-        "Education": {
-            "weight": 0.25,
-            "keywords": ["btech", "ms", "phd", "iit", "bits", "iiit", "nit", "computer science", "degree"]
-        },
-        "Domain Expertise": {
-            "weight": 0.30,
-            "keywords": ["computer vision", "video analytics", "object detection", "tracking", "activity recognition", "perception", "machine learning", "data scientist"]
-        },
-        "Technical Stack": {
-            "weight": 0.25,
-            "keywords": ["pytorch", "tensorflow", "transformers", "3d cnns", "mot", "cnn", "opencv", "python", "sql"]
-        },
-        "Scale & Deployment": {
-            "weight": 0.20,
-            "keywords": ["edge deployment", "mlops", "real-time inference", "production-scale", "production", "inference"]
-        }
+        "Education": {"weight": 0.25, "keywords": ["btech", "ms", "phd", "iit", "bits", "iiit", "nit", "computer science", "degree"]},
+        "Domain Expertise": {"weight": 0.30, "keywords": ["computer vision", "video analytics", "object detection", "tracking", "activity recognition", "perception", "machine learning", "data scientist"]},
+        "Technical Stack": {"weight": 0.25, "keywords": ["pytorch", "tensorflow", "transformers", "3d cnns", "mot", "cnn", "opencv", "python", "sql"]},
+        "Scale & Deployment": {"weight": 0.20, "keywords": ["edge deployment", "mlops", "real-time inference", "production-scale", "production", "inference"]}
     }
 
     total_score = 0
@@ -101,7 +91,6 @@ def run_local_keyword_assessment(jd_clean, cv_clean):
     for cat, data in categories.items():
         weight = data["weight"]
         keywords = data["keywords"]
-        
         jd_filtered = " ".join([kw for kw in keywords if kw in jd_lower])
         cv_filtered = " ".join([kw for kw in keywords if kw in cv_lower])
         
@@ -129,7 +118,6 @@ def run_local_keyword_assessment(jd_clean, cv_clean):
     </table>
     """
     
-    # Generate static fallback next steps matching structure constraints
     insights_html = f"""
     <div style="margin-top: 25px; padding: 20px; border: 1px solid #cbd5e1; border-radius: 8px; background-color: #f8fafc; font-family: sans-serif; line-height: 1.6;">
         <h3 style="color: #1e293b; margin-top: 0; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">🎯 HR / Recruiter Next Steps (Local Engine Mode)</h3>
@@ -142,9 +130,8 @@ def run_local_keyword_assessment(jd_clean, cv_clean):
     
     return total_score, breakdown_html, insights_html
 
-# --- 🌌 INTELLIGENT GOOGLE GENAI ENGINE (When Key is Present) ---
+# --- 🌌 INTELLIGENT GOOGLE GENAI ENGINE ---
 def request_gemini_evaluation(jd_text, cv_text, cv_image_bytes=None, cv_filename=""):
-    """Streams payloads directly into Gemini 2.5 Flash for unified context matching."""
     system_prompt = """
     You are an expert recruitment system modeled after Whitetable AI.
     Analyze the provided Job Description against the Candidate Resume.
@@ -221,34 +208,34 @@ with col1:
     st.subheader("📋 1. Target Job Description")
     uploaded_jd = st.file_uploader("Upload JD File", type=["pdf", "docx", "txt", "png", "jpg", "jpeg"], key="jd_uploader")
     
-    jd_placeholder_text = ""
     if uploaded_jd:
         ext = uploaded_jd.name.split('.')[-1].lower()
         if ext in ['png', 'jpg', 'jpeg', 'webp', 'bmp']:
-            jd_placeholder_text = f"[📸 Image Registered: {uploaded_jd.name}. Will evaluate visually.]"
+            st.session_state.jd_workspace = f"[📸 Image Registered: {uploaded_jd.name}. Will evaluate visually.]"
         else:
-            jd_placeholder_text = extract_text_from_bytes(uploaded_jd.read(), uploaded_jd.name)
+            st.session_state.jd_workspace = extract_text_from_bytes(uploaded_jd.read(), uploaded_jd.name)
             
-    jd_area = st.text_area("JD Layout Workspace:", value=jd_placeholder_text, height=220, key="jd_area_box")
+    # FIXED: Bound explicitly to st.session_state key map pipeline wires
+    jd_area = st.text_area("JD Layout Workspace:", key="jd_workspace", height=220)
 
 with col2:
     st.subheader("📄 2. Candidate Resume (CV)")
     uploaded_cv = st.file_uploader("Upload CV File", type=["pdf", "docx", "txt", "png", "jpg", "jpeg"], key="cv_uploader")
     
-    cv_placeholder_text = ""
     cv_bytes, cv_name = None, ""
     if uploaded_cv:
         cv_name = uploaded_cv.name
         cv_bytes = uploaded_cv.read()
         ext = cv_name.split('.')[-1].lower()
         if ext in ['png', 'jpg', 'jpeg', 'webp', 'bmp']:
-            cv_placeholder_text = f"[📸 Image Registered: {cv_name}. Will evaluate visually.]"
+            st.session_state.cv_workspace = f"[📸 Image Registered: {cv_name}. Will evaluate visually.]"
         else:
-            cv_placeholder_text = extract_text_from_bytes(cv_bytes, cv_name)
+            st.session_state.cv_workspace = extract_text_from_bytes(cv_bytes, cv_name)
             
-    cv_area = st.text_area("CV Layout Workspace:", value=cv_placeholder_text, height=220, key="cv_area_box")
+    # FIXED: Bound explicitly to st.session_state key map pipeline wires
+    cv_area = st.text_area("CV Layout Workspace:", key="cv_workspace", height=220)
 
-# --- 🚀 CONFIGURING THE DYNAMIC TRIGGER BUTTON TEXT ---
+# --- 🚀 ACTION BUTTON LAYOUTS ---
 button_label = "🚀 Run Intelligent API Assessment" if ai_client is not None else "🚀 Run Intelligent Assessment"
 
 btn_col1, btn_col2 = st.columns([0.7, 0.3])
@@ -258,6 +245,8 @@ with btn_col1:
 
 with btn_col2:
     if st.button("🧹 Reset & Clean Dashboard", use_container_width=True):
+        st.session_state.jd_workspace = ""
+        st.session_state.cv_workspace = ""
         st.rerun()
 
 if run_btn:
@@ -267,7 +256,6 @@ if run_btn:
     if not final_jd or not final_cv:
         st.error("❌ Input Error: Both workspace areas must contain valid text parameters before continuing.")
     else:
-        # Check routing branch based on client initialization states
         if ai_client is not None:
             with st.spinner("🤖 Running context matrix analysis via Gemini AI API..."):
                 score, table_html, steps_html = request_gemini_evaluation(
@@ -276,7 +264,7 @@ if run_btn:
                     cv_bytes, cv_name
                 )
         else:
-            with st.spinner("💾 No API Key found. Running analysis locally using independent keyword matching configurations..."):
+            with st.spinner("💾 No API Key found. Running analysis locally..."):
                 if "[📸 Image Registered:" in final_jd or "[📸 Image Registered:" in final_cv:
                     st.error("❌ Fallback Limitation: Image processing requires an active Google API Key. Please paste a key to read screenshot layouts.")
                     score, table_html, steps_html = 0.0, "", ""
