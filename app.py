@@ -10,7 +10,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 # 🖥️ Page Layout Setup
 st.set_page_config(
-    page_title="Whitetable AI: Multimodal Multi-Resume Screener",
+    page_title="AI Recruiter: Multimodal Multi-Resume Screener",
     page_icon="🎯",
     layout="wide"
 )
