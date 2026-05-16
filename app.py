@@ -15,7 +15,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🎯 Whitetable AI: Multimodal Multi-Resume Screener")
+st.title("🎯 AI Recruiter: Multimodal Multi-Resume Screener")
 st.caption("Upload an Image, PDF, DOCX, or TXT document to evaluate CV compatibility contextually.")
 
 # --- 🔄 INITIALIZE SECURE STATE MAPS ---
